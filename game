@@ -1,1 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Run v2 (Bills Relocate)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #111;
+            font-family: 'Press Start 2P', cursive;
+            color: #fff;
+            overflow: hidden;
+        }
 
+        #gameContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border: 4px solid #fff;
+            border-radius: 10px;
+            padding: 20px;
+            background-color: #222;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+        }
+
+        #gameCanvas {
+            background-color: #000;
+            border-radius: 8px;
+        }
+
+        #controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            font-family: 'Press Start 2P', cursive;
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #4CAF50; /* Green */
+            border: 2px solid #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 4px #2E7D32;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #2E7D32;
+        }
+
+        #scoreBoard {
+            margin-top: 15px;
+            font-size: 20px;
+            text-align: center;
+        }
+
+        #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            font-size: 20px; 
+            text-align: center;
+            z-index: 100;
+            display: none;
+            border: 3px solid #fff;
+            max-width: 80%;
+        }
+        #messageBox p {
+            margin-bottom: 20px; 
+            line-height: 1.6; 
+        }
+        #messageBox button {
+            margin-top: 10px; 
+            background-color: #f44336; 
+            box-shadow: 0 4px #c3352b;
+        }
+        #messageBox button:hover {
+            background-color: #e53935;
+        }
+         #messageBox button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #c3352b;
+        }
+
+
+        #touchControls {
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+            width: 180px;
+        }
+
+        #touchControls button {
+            font-size: 20px;
+            padding: 15px;
+            background-color: #337ab7;
+            box-shadow: 0 4px #285e8e;
+        }
+         #touchControls button:hover {
+            background-color: #2c6aa0;
+        }
+        #touchControls button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px #285e8e;
+        }
+
+        .up { grid-column: 2 / 3; grid-row: 1 / 2; }
+        .left { grid-column: 1 / 2; grid-row: 2 / 3; }
+        .down { grid-column: 2 / 3; grid-row: 2 / 3; }
+        .right { grid-column: 3 / 4; grid-row: 2 / 3; }
+
+        @media (max-width: 600px) {
+            #gameContainer { padding: 10px; border-width: 2px; }
+            #scoreBoard { font-size: 16px; }
+            button { font-size: 14px; padding: 8px 15px; }
+            #messageBox { font-size: 16px; padding: 20px; }
+            #touchControls { display: grid; }
+        }
+
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="scoreBoard">Funds: $100</div>
+        <div id="controls">
+            <button id="startButton">Start Game</button>
+        </div>
+         <div id="touchControls">
+            <button class="up" data-direction="up">▲</button>
+            <button class="left" data-direction="left">◀</button>
+            <button class="down" data-direction="down">▼</button>
+            <button class="right" data-direction="right">▶</button>
+        </div>
+    </div>
+
+    <div id="messageBox">
+        <p id="messageText"></p>
+        <button id="messageButton">Play Again</button>
+    </div>
+
+    <script>
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const startButton = document.getElementById('startButton');
+        const messageButton = document.getElementById('messageButton');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const touchControlsContainer = document.getElementById('touchControls');
+
+        const gridSize = 20;
+        let tileCountX = 20;
+        let tileCountY = 15;
+
+        canvas.width = gridSize * tileCountX;
+        canvas.height = gridSize * tileCountY;
+
+        let gameLoopInterval;
+        let gameSpeed = 220; 
+        let funds = 100;
+        let gameActive = false;
+        let gamePausedForBill = false;
+        let isBillPopupShowing = false;
+        let walletOpen = true;
+        let animationFrame = 0;
+
+        const unexpectedBillsList = [
+            { name: "Flat Tire", cost: 50 },
+            { name: "Speeding Ticket", cost: 75 },
+            { name: "Appliance Repair", cost: 60 },
+            { name: "Unexpected Vet Visit", cost: 100 },
+            { name: "Leaky Pipe", cost: 40 },
+            { name: "Impulse Gadget Buy", cost: 30 },
+            { name: "Emergency Dentist", cost: 90 },
+            { name: "Subscription Auto-Renewal", cost: 20 }
+        ];
+
+        // --- Game Elements ---
+        let player = {
+            x: 1, y: 1, dx: 0, dy: 0, size: gridSize * 0.8, mouthOpenAmount: 0.2
+        };
+        let coins = [];
+        let bills = [];
+
+        const wallColor = '#4A4A4A';
+        const coinColor = '#FFD700';
+        const billColor = '#FF6347';
+        const walletColor = '#8B4513';
+        const walletLiningColor = '#D2B48C';
+        let map = [];
+
+        function generateMap() {
+            map = [];
+            for (let y = 0; y < tileCountY; y++) {
+                const row = [];
+                for (let x = 0; x < tileCountX; x++) {
+                    if (x === 0 || x === tileCountX - 1 || y === 0 || y === tileCountY - 1 ||
+                        (Math.random() < 0.2 && !(x === player.x && y === player.y))) {
+                        row.push(1); 
+                    } else {
+                        row.push(0); 
+                    }
+                }
+                map.push(row);
+            }
+            map[player.y][player.x] = 0;
+            for (let i = -1; i <= 1; i++) {
+                for (let j = -1; j <= 1; j++) {
+                    const checkY = player.y + i;
+                    const checkX = player.x + j;
+                    if (checkY >= 0 && checkY < tileCountY && checkX >= 0 && checkX < tileCountX) {
+                         if (map[checkY] && map[checkY][checkX] !== undefined) {
+                            map[checkY][checkX] = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Drawing Functions ---
+        function drawRect(x, y, width, height, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, width, height);
+        }
+
+        function drawCircle(x, y, radius, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawWallet() {
+            const centerX = player.x * gridSize + gridSize / 2;
+            const centerY = player.y * gridSize + gridSize / 2;
+            const size = player.size * 0.8;
+            ctx.fillStyle = walletColor;
+            ctx.strokeStyle = walletLiningColor;
+            ctx.lineWidth = 2;
+            const currentMouthOpen = walletOpen ? player.mouthOpenAmount : 0.1;
+            ctx.beginPath();
+            if (player.dx === 1) ctx.arc(centerX, centerY, size / 2, Math.PI * currentMouthOpen, Math.PI * (2 - currentMouthOpen));
+            else if (player.dx === -1) ctx.arc(centerX, centerY, size / 2, Math.PI * (1 + currentMouthOpen), Math.PI * (1 - currentMouthOpen));
+            else if (player.dy === 1) ctx.arc(centerX, centerY, size / 2, Math.PI * (0.5 + currentMouthOpen), Math.PI * (0.5 - currentMouthOpen), true);
+            else if (player.dy === -1) ctx.arc(centerX, centerY, size / 2, Math.PI * (1.5 + currentMouthOpen), Math.PI * (1.5 - currentMouthOpen), true);
+            else ctx.arc(centerX, centerY, size / 2, Math.PI * currentMouthOpen, Math.PI * (2 - currentMouthOpen));
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = walletLiningColor;
+            if (player.dx === 1) ctx.fillRect(centerX, centerY - size / 8, size / 2, size / 4);
+            else if (player.dx === -1) ctx.fillRect(centerX - size / 2, centerY - size / 8, size / 2, size / 4);
+            else if (player.dy === 1) ctx.fillRect(centerX - size / 8, centerY, size / 4, size / 2);
+            else if (player.dy === -1) ctx.fillRect(centerX - size / 8, centerY - size/2, size / 4, size / 2);
+            else ctx.fillRect(centerX, centerY - size / 8, size / 2, size / 4);
+        }
+
+        function drawMap() {
+            for (let y = 0; y < tileCountY; y++) {
+                for (let x = 0; x < tileCountX; x++) {
+                    if (map[y][x] === 1) { 
+                        drawRect(x * gridSize, y * gridSize, gridSize, gridSize, wallColor);
+                    }
+                }
+            }
+        }
+
+        function drawCoins() {
+            coins.forEach(coin => {
+                drawCircle(coin.x * gridSize + gridSize / 2, coin.y * gridSize + gridSize / 2, gridSize / 4, coinColor);
+            });
+        }
+
+        function drawBills() {
+            bills.forEach(bill => {
+                const billCenterX = bill.x * gridSize + gridSize / 2;
+                const billVisualWidth = gridSize * 0.8;
+                const billVisualHeight = gridSize * 0.6;
+                ctx.fillStyle = billColor;
+                ctx.fillRect(bill.x * gridSize + (gridSize - billVisualWidth) / 2,
+                             bill.y * gridSize + (gridSize - billVisualHeight) / 2,
+                             billVisualWidth, billVisualHeight);
+                ctx.fillStyle = 'white';
+                ctx.font = `bold ${gridSize * 0.45}px 'Press Start 2P'`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('$', billCenterX, bill.y * gridSize + (gridSize - billVisualHeight)/2 + billVisualHeight/2 );
+            });
+        }
+
+        // --- Game Logic ---
+        function placeCoins() {
+            coins = [];
+            for (let y = 0; y < tileCountY; y++) {
+                for (let x = 0; x < tileCountX; x++) {
+                    if (map[y][x] === 0 && !(x === player.x && y === player.y) && Math.random() < 0.7 ) {
+                        coins.push({ x, y });
+                    }
+                }
+            }
+            if (coins.length === 0) {
+                let placed = false;
+                let attempts = 0;
+                while(!placed && attempts < tileCountX * tileCountY){ 
+                    const randX = Math.floor(Math.random() * (tileCountX -2)) + 1; 
+                    const randY = Math.floor(Math.random() * (tileCountY -2)) + 1;
+                    if(map[randY][randX] === 0 && !(randX === player.x && randY === player.y)){
+                        coins.push({x: randX, y: randY});
+                        placed = true;
+                    }
+                    attempts++;
+                }
+            }
+        }
+
+        function placeBills() {
+            bills = [];
+            const numBills = 3;
+            const billStartCoordinates = [
+                { x: tileCountX - 2, y: tileCountY - 2 }, 
+                { x: tileCountX - 3, y: tileCountY - 2 }, 
+                { x: tileCountX - 2, y: tileCountY - 3 },
+            ];
+
+            for (let i = 0; i < numBills; i++) {
+                let xPos, yPos;
+                if (i < billStartCoordinates.length) {
+                    xPos = billStartCoordinates[i].x;
+                    yPos = billStartCoordinates[i].y;
+                } else { 
+                    xPos = tileCountX - 2;
+                    yPos = tileCountY - 2;
+                }
+                xPos = Math.max(1, Math.min(tileCountX - 2, xPos));
+                yPos = Math.max(1, Math.min(tileCountY - 2, yPos));
+                bills.push({ x: xPos, y: yPos, dx: 0, dy: 0, speed: 1 });
+            }
+        }
+
+
+        function updatePlayerPosition() {
+            const nextX = player.x + player.dx;
+            const nextY = player.y + player.dy;
+            if (map[nextY] && map[nextY][nextX] !== undefined && map[nextY][nextX] !== 1) {
+                player.x = nextX;
+                player.y = nextY;
+            }
+            coins = coins.filter(coin => {
+                if (coin.x === player.x && coin.y === player.y) {
+                    funds += 10;
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        function updateBillPosition(bill) {
+            const moveAttempts = [
+                { dx: Math.sign(player.x - bill.x), dy: 0 }, 
+                { dx: 0, dy: Math.sign(player.y - bill.y) }, 
+                { dx: (Math.random() < 0.5 ? -1 : 1), dy: 0 }, 
+                { dx: 0, dy: (Math.random() < 0.5 ? -1 : 1) }  
+            ];
+
+            for (const attempt of moveAttempts) {
+                if (attempt.dx === 0 && attempt.dy === 0) continue; 
+                const nextX = bill.x + attempt.dx;
+                const nextY = bill.y + attempt.dy;
+                if (map[nextY] && map[nextY][nextX] !== undefined && map[nextY][nextX] !== 1) {
+                    const billCollisionWithOtherBill = bills.some(otherBill => otherBill !== bill && otherBill.x === nextX && otherBill.y === nextY);
+                    if (!billCollisionWithOtherBill) {
+                        bill.x = nextX;
+                        bill.y = nextY;
+                        break; 
+                    }
+                }
+            }
+        }
+        
+        // New function to relocate all bills away from the player
+        function relocateAllBillsSafely() {
+            bills.forEach(billToMove => {
+                let newX, newY;
+                let attempts = 0;
+                const maxAttempts = 100; // Increased attempts for denser maps
+
+                do {
+                    newX = Math.floor(Math.random() * (tileCountX - 2)) + 1; // Avoid outer walls
+                    newY = Math.floor(Math.random() * (tileCountY - 2)) + 1; // Avoid outer walls
+                    attempts++;
+
+                    const isWall = map[newY][newX] === 1;
+                    // Check if the new spot is adjacent to or on the player's current position
+                    const isAdjacentOrOnPlayer = (Math.abs(newX - player.x) <= 1 && Math.abs(newY - player.y) <= 1);
+                    // Check if the new spot is occupied by another bill (that isn't the one we are currently trying to move)
+                    // This check is against the *current* positions of other bills.
+                    const isOccupiedByOtherBill = bills.some(otherBill => {
+                        return otherBill !== billToMove && otherBill.x === newX && otherBill.y === newY;
+                    });
+
+                    if (!isWall && !isAdjacentOrOnPlayer && !isOccupiedByOtherBill) {
+                        billToMove.x = newX;
+                        billToMove.y = newY;
+                        break; // Found a good spot
+                    }
+                } while (attempts < maxAttempts);
+
+                if (attempts >= maxAttempts) {
+                    // Fallback: if a non-adjacent spot isn't found quickly,
+                    // place it randomly but still avoid walls, player's exact spot, and other bills.
+                    // This is a safety net, less likely to be hit with increased maxAttempts.
+                    console.warn("Could not find a non-adjacent safe spot for a bill after max attempts. Using basic safe placement.");
+                    let fallbackAttempts = 0;
+                    do {
+                        newX = Math.floor(Math.random() * (tileCountX - 2)) + 1;
+                        newY = Math.floor(Math.random() * (tileCountY - 2)) + 1;
+                        fallbackAttempts++;
+                        const isWallFallback = map[newY][newX] === 1;
+                        const isOnPlayerFallback = (newX === player.x && newY === player.y);
+                        const isOccupiedFallback = bills.some(otherBill => otherBill !== billToMove && otherBill.x === newX && otherBill.y === newY);
+
+                        if (!isWallFallback && !isOnPlayerFallback && !isOccupiedFallback) {
+                            billToMove.x = newX;
+                            billToMove.y = newY;
+                            break;
+                        }
+                    } while (fallbackAttempts < maxAttempts);
+                    // If even this fails, the bill might not move or could overlap in extremely rare dense map scenarios.
+                }
+            });
+        }
+
+
+        function checkBillCollision() {
+            bills.forEach(bill => {
+                if (bill.x === player.x && bill.y === player.y) {
+                    gamePausedForBill = true; 
+
+                    const randomBillEncounter = unexpectedBillsList[Math.floor(Math.random() * unexpectedBillsList.length)];
+                    funds -= randomBillEncounter.cost;
+
+                    // The colliding bill is moved immediately to a random safe spot (not necessarily non-adjacent yet)
+                    // This prevents it from staying on the player if the player doesn't move.
+                    // The relocateAllBillsSafely() function will then handle all bills including this one.
+                    let tempNewBillX, tempNewBillY;
+                    let tempAttempts = 0;
+                    do {
+                        tempNewBillX = Math.floor(Math.random() * (tileCountX - 2)) + 1;
+                        tempNewBillY = Math.floor(Math.random() * (tileCountY - 2)) + 1;
+                        tempAttempts++;
+                    } while (
+                        (map[tempNewBillY][tempNewBillX] === 1 ||
+                        (tempNewBillX === player.x && tempNewBillY === player.y) || 
+                        bills.some(b => b !== bill && b.x === tempNewBillX && b.y === tempNewBillY)) && tempAttempts < 50
+                    );
+                    if (tempAttempts < 50) {
+                        bill.x = tempNewBillX;
+                        bill.y = tempNewBillY;
+                    }
+                    // If it fails to find a spot, it stays, but relocateAllBillsSafely will try again.
+
+                    updateScoreBoard();
+
+                    if (funds <= 0) {
+                        gameOver(`Out of Funds after a ${randomBillEncounter.name}!`);
+                        return; 
+                    }
+                    
+                    isBillPopupShowing = true;
+                    showMessage(`Unexpected Bill!\n${randomBillEncounter.name}\nCost: $${randomBillEncounter.cost}`);
+                    messageButton.textContent = "Ouch! (Continue)";
+                    messageButton.style.backgroundColor = '#f44336';
+                    messageButton.style.boxShadow = '0 4px #c3352b';
+                }
+            });
+        }
+
+
+        function updateScoreBoard() {
+            scoreBoard.textContent = `Funds: $${funds}`;
+        }
+
+        function showMessage(text) {
+            messageText.innerHTML = text.replace(/\n/g, '<br>');
+            messageBox.style.display = 'flex';
+            messageButton.focus();
+        }
+
+        function hideMessage() {
+            messageBox.style.display = 'none';
+        }
+
+        function gameOver(reason) {
+            gameActive = false;
+            gamePausedForBill = false;
+            isBillPopupShowing = false;
+            clearInterval(gameLoopInterval);
+            showMessage(`Game Over!<br>${reason}`);
+            messageButton.textContent = "Play Again?";
+            messageButton.style.backgroundColor = '#4CAF50';
+            messageButton.style.boxShadow = '0 4px #2E7D32';
+            startButton.style.display = 'none';
+        }
+
+        function checkWinCondition() {
+            if (coins.length === 0 && gameActive) { 
+                gameActive = false;
+                gamePausedForBill = false;
+                isBillPopupShowing = false;
+                clearInterval(gameLoopInterval);
+                showMessage("You collected all coins!<br>You Win!");
+                messageButton.textContent = "Play Again?";
+                messageButton.style.backgroundColor = '#4CAF50';
+                messageButton.style.boxShadow = '0 4px #2E7D32';
+                startButton.style.display = 'none';
+            }
+        }
+
+        // --- Game Loop ---
+        function gameTick() {
+            if (!gameActive || gamePausedForBill) return;
+
+            animationFrame++;
+            if (animationFrame % 10 === 0) {
+                walletOpen = !walletOpen;
+            }
+
+            updatePlayerPosition();
+            bills.forEach(bill => updateBillPosition(bill));
+            checkBillCollision(); // This might set gamePausedForBill
+
+            if (gamePausedForBill || !gameActive) return; // Re-check after collision handling
+
+            updateScoreBoard();
+
+            drawRect(0, 0, canvas.width, canvas.height, '#000');
+            drawMap();
+            drawCoins();
+            drawWallet();
+            drawBills();
+
+            checkWinCondition();
+        }
+
+
+        // --- Event Listeners ---
+        function handleKeyDown(e) {
+            if (messageBox.style.display !== 'none') {
+                 if (e.key === 'Enter' || e.key === ' ') {
+                    messageButton.click();
+                    e.preventDefault();
+                }
+                return;
+            }
+
+            if (!gameActive && (e.key === 'Enter' || e.key === ' ')) {
+                 if (startButton.style.display !== 'none' && !startButton.disabled) {
+                    startGame();
+                    e.preventDefault();
+                }
+                return;
+            }
+            if (!gameActive) return;
+
+
+            switch (e.key) {
+                case 'ArrowUp': case 'w': case 'W': player.dx = 0; player.dy = -1; e.preventDefault(); break;
+                case 'ArrowDown': case 's': case 'S': player.dx = 0; player.dy = 1; e.preventDefault(); break;
+                case 'ArrowLeft': case 'a': case 'A': player.dx = -1; player.dy = 0; e.preventDefault(); break;
+                case 'ArrowRight': case 'd': case 'D': player.dx = 1; player.dy = 0; e.preventDefault(); break;
+            }
+        }
+
+        function setupTouchControls() {
+            const buttons = touchControlsContainer.querySelectorAll('button');
+            buttons.forEach(button => {
+                button.addEventListener('click', () => {
+                    if (!gameActive || gamePausedForBill || messageBox.style.display !== 'none') return;
+                    const direction = button.dataset.direction;
+                    switch (direction) {
+                        case 'up':    player.dx = 0; player.dy = -1; break;
+                        case 'down':  player.dx = 0; player.dy = 1;  break;
+                        case 'left':  player.dx = -1; player.dy = 0; break;
+                        case 'right': player.dx = 1; player.dy = 0;  break;
+                    }
+                });
+            });
+        }
+
+        function resetPlayer() {
+            player.x = 1; player.y = 1; player.dx = 0; player.dy = 0; walletOpen = true;
+        }
+
+        function initGame() {
+            funds = 100;
+            gameActive = false;
+            gamePausedForBill = false;
+            isBillPopupShowing = false;
+            resetPlayer();
+            generateMap(); 
+            const billClearSpotsLogical = [
+                { x: tileCountX - 2, y: tileCountY - 2 },
+                { x: tileCountX - 3, y: tileCountY - 2 },
+                { x: tileCountX - 2, y: tileCountY - 3 },
+            ];
+            for (const spot of billClearSpotsLogical) {
+                let clearX = spot.x;
+                let clearY = spot.y;
+                clearX = Math.max(1, Math.min(tileCountX - 2, clearX));
+                clearY = Math.max(1, Math.min(tileCountY - 2, clearY));
+                if (map[clearY] && map[clearY][clearX] !== undefined) {
+                    if (!(clearX === player.x && clearY === player.y)) {
+                         map[clearY][clearX] = 0; 
+                    }
+                }
+            }
+            placeCoins();  
+            placeBills();  
+            updateScoreBoard();
+            hideMessage();
+            startButton.style.display = 'block';
+            startButton.textContent = 'Start Game';
+            startButton.disabled = false;
+            drawRect(0, 0, canvas.width, canvas.height, '#000');
+            drawMap();
+            drawCoins();
+            drawWallet();
+            drawBills();
+        }
+
+        function startGame() {
+            if (gameActive) return;
+            initGame(); 
+            gameActive = true;
+            startButton.textContent = 'Good Luck!';
+            startButton.disabled = true;
+            hideMessage();
+            if (gameLoopInterval) clearInterval(gameLoopInterval);
+            gameLoopInterval = setInterval(gameTick, gameSpeed);
+            canvas.focus();
+        }
+
+        messageButton.addEventListener('click', () => {
+            hideMessage();
+            if (isBillPopupShowing) {
+                isBillPopupShowing = false;
+                // Relocate all bills safely away from the player before unpausing
+                relocateAllBillsSafely(); 
+                gamePausedForBill = false;
+                
+                if (funds <= 0 && gameActive) { 
+                     gameOver("Out of Funds!"); // Should have been caught, but as a safeguard
+                } else if (gameActive) { 
+                    canvas.focus(); // Ensure game canvas has focus for keyboard input
+                    // Redraw the game immediately to show relocated bills before the next tick
+                    drawRect(0, 0, canvas.width, canvas.height, '#000');
+                    drawMap();
+                    drawCoins();
+                    drawWallet();
+                    drawBills();
+                }
+            } else { 
+                startGame(); 
+            }
+        });
+
+
+        function resizeGame() {
+            const gameContainerWidth = document.getElementById('gameContainer').offsetWidth - 40; 
+            const targetTileCountX = 20; 
+            const targetTileCountY = 15;
+            const aspectRatio = targetTileCountX / targetTileCountY;
+            let newCanvasWidth = gameContainerWidth;
+            let newCanvasHeight = gameContainerWidth / aspectRatio;
+            if (newCanvasHeight > window.innerHeight * 0.7) { 
+                newCanvasHeight = window.innerHeight * 0.7;
+                newCanvasWidth = newCanvasHeight * aspectRatio;
+            }
+            let newTilesX = Math.floor(newCanvasWidth / gridSize);
+            let newTilesY = Math.floor(newCanvasHeight / gridSize);
+            newTilesX = Math.max(6, newTilesX);
+            newTilesY = Math.max(6, newTilesY);
+
+            if (newTilesX !== tileCountX || newTilesY !== tileCountY) {
+                tileCountX = newTilesX;
+                tileCountY = newTilesY;
+            }
+            canvas.width = tileCountX * gridSize;
+            canvas.height = tileCountY * gridSize;
+            canvas.style.width = `${canvas.width}px`; 
+            canvas.style.height = `${canvas.height}px`;
+            
+            if (!gameActive || gamePausedForBill) {
+                initGame();
+            } else {
+                drawRect(0, 0, canvas.width, canvas.height, '#000');
+                drawMap(); 
+                drawCoins();
+                drawWallet();
+                drawBills();
+            }
+        }
+
+        window.addEventListener('resize', resizeGame);
+        window.addEventListener('keydown', handleKeyDown);
+        startButton.addEventListener('click', startGame);
+
+        setupTouchControls();
+        resizeGame(); 
+        initGame(); 
+    </script>
+</body>
+</html>
